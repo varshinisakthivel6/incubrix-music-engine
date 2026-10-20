@@ -1,0 +1,473 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IncuBrix AI Background Music Engine</title>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #10131b;
+      color: #f4f6fb;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 850px;
+      margin: auto;
+    }
+
+    h1 { margin-bottom: 8px; }
+
+    .subtitle {
+      color: #aab2c5;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: #1a2030;
+      border: 1px solid #30394d;
+      border-radius: 14px;
+      padding: 22px;
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin: 16px 0 8px;
+      font-weight: bold;
+    }
+
+    input, textarea, select, button {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #424d64;
+      background: #111725;
+      color: white;
+      font-size: 15px;
+    }
+
+    textarea {
+      min-height: 110px;
+      resize: vertical;
+    }
+
+    button {
+      border: 0;
+      background: #6d70f5;
+      cursor: pointer;
+      font-weight: bold;
+      margin-top: 14px;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .secondary {
+      background: #2a3449;
+    }
+
+    video, audio {
+      width: 100%;
+      margin-top: 14px;
+    }
+
+    .muted { color: #aab2c5; }
+
+    .status {
+      padding: 12px;
+      border-radius: 8px;
+      background: #111725;
+      margin-top: 14px;
+      overflow-wrap: anywhere;
+    }
+
+    .hidden { display: none; }
+
+    a {
+      display: inline-block;
+      color: #a9c7ff;
+      margin: 12px 12px 0 0;
+    }
+
+    progress {
+      width: 100%;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+
+<body>
+<div class="container">
+  <h1>IncuBrix AI Background Music Engine</h1>
+  <p class="subtitle">
+    Generate instrumental background music and combine it with your video.
+  </p>
+
+  <section class="card">
+    <h2>1. Upload your video</h2>
+
+    <label for="videoInput">Choose a video</label>
+    <input id="videoInput" type="file" accept="video/*">
+
+    <p id="videoInfo" class="muted">No video selected.</p>
+    <video id="videoPreview" controls class="hidden"></video>
+  </section>
+
+  <section class="card">
+    <h2>2. Describe your music</h2>
+
+    <p class="muted">
+      Generate a starter prompt from the video's duration and metadata,
+      then edit it to describe the mood, instruments and style you want.
+    </p>
+
+    <button id="suggestButton" class="secondary" type="button">
+      Create starter prompt
+    </button>
+
+    <label for="promptInput">Music prompt</label>
+    <textarea id="promptInput"
+      placeholder="Example: Calm cinematic instrumental music with piano, warm strings and gentle percussion. No vocals."></textarea>
+
+    <label for="durationInput">Music duration</label>
+    <select id="durationInput">
+      <option value="10">10 seconds</option>
+      <option value="20">20 seconds</option>
+      <option value="30" selected>30 seconds</option>
+      <option value="60">1 minute</option>
+      <option value="120">2 minutes</option>
+      <option value="180">3 minutes</option>
+      <option value="300">5 minutes</option>
+    </select>
+
+    <button id="generateButton" type="button">
+      Generate Music
+    </button>
+
+    <div id="statusText" class="status" role="status">
+      Ready.
+    </div>
+
+    <progress id="progressBar" value="0" max="100"></progress>
+
+    <div id="musicResult" class="hidden">
+      <h3>Generated music</h3>
+      <audio id="audioPlayer" controls></audio>
+      <div id="musicDownloads"></div>
+    </div>
+  </section>
+
+  <section id="finalSection" class="card hidden">
+    <h2>3. Final video</h2>
+    <p class="muted">
+      The generated music is combined with the uploaded video's visuals.
+    </p>
+
+    <button id="mergeButton" type="button">
+      Create Final Video
+    </button>
+
+    <div id="mergeStatus" class="status" role="status">
+      Waiting for music generation.
+    </div>
+
+    <video id="finalPreview" controls class="hidden"></video>
+    <div id="finalDownloads"></div>
+  </section>
+</div>
+
+<script>
+  const API_BASE = "http://127.0.0.1:8000";
+
+  const videoInput = document.getElementById("videoInput");
+  const videoPreview = document.getElementById("videoPreview");
+  const videoInfo = document.getElementById("videoInfo");
+  const promptInput = document.getElementById("promptInput");
+  const durationInput = document.getElementById("durationInput");
+  const suggestButton = document.getElementById("suggestButton");
+  const generateButton = document.getElementById("generateButton");
+  const statusText = document.getElementById("statusText");
+  const progressBar = document.getElementById("progressBar");
+
+  const musicResult = document.getElementById("musicResult");
+  const audioPlayer = document.getElementById("audioPlayer");
+  const musicDownloads = document.getElementById("musicDownloads");
+
+  const finalSection = document.getElementById("finalSection");
+  const mergeButton = document.getElementById("mergeButton");
+  const mergeStatus = document.getElementById("mergeStatus");
+  const finalPreview = document.getElementById("finalPreview");
+  const finalDownloads = document.getElementById("finalDownloads");
+
+  let selectedVideo = null;
+  let selectedVideoDuration = null;
+  let currentJobId = null;
+  let currentJobResult = null;
+
+  function setStatus(message) {
+    statusText.textContent = message;
+  }
+
+  function setMergeStatus(message) {
+    mergeStatus.textContent = message;
+  }
+
+  function formatTime(seconds) {
+    if (!Number.isFinite(seconds)) return "Unknown";
+    const minutes = Math.floor(seconds / 60);
+    const remaining = Math.floor(seconds % 60);
+    return `${minutes}:${String(remaining).padStart(2, "0")}`;
+  }
+
+  async function readJson(response) {
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const detail = data.detail;
+      const message = typeof detail === "string"
+        ? detail
+        : detail?.message || data.message || `HTTP ${response.status}`;
+
+      throw new Error(message);
+    }
+
+    return data;
+  }
+
+  videoInput.addEventListener("change", () => {
+    selectedVideo = videoInput.files?.[0] || null;
+    selectedVideoDuration = null;
+
+    videoPreview.classList.add("hidden");
+    videoInfo.textContent = "No video selected.";
+    finalSection.classList.add("hidden");
+
+    if (!selectedVideo) return;
+
+    const videoUrl = URL.createObjectURL(selectedVideo);
+    videoPreview.src = videoUrl;
+    videoPreview.classList.remove("hidden");
+    videoInfo.textContent =
+      `${selectedVideo.name} · ${(selectedVideo.size / (1024 * 1024)).toFixed(1)} MB`;
+
+    videoPreview.onloadedmetadata = () => {
+      selectedVideoDuration = videoPreview.duration;
+      videoInfo.textContent =
+        `${selectedVideo.name} · ${formatTime(selectedVideoDuration)} · ` +
+        `${(selectedVideo.size / (1024 * 1024)).toFixed(1)} MB`;
+    };
+  });
+
+  suggestButton.addEventListener("click", () => {
+    if (!selectedVideo) {
+      alert("Please select a video first.");
+      return;
+    }
+
+    const durationText = Number.isFinite(selectedVideoDuration)
+      ? `The video is approximately ${Math.round(selectedVideoDuration)} seconds long.`
+      : "Match the music length to the video.";
+
+    promptInput.value =
+      `Create original instrumental background music for a video. ` +
+      `${durationText} ` +
+      `Mood: cinematic and engaging. ` +
+      `Use separate melody, bass, harmony and percussion parts. ` +
+      `No vocals, no lyrics, no recognizable copyrighted melodies. ` +
+      `Use a clean mix with a smooth ending.`;
+
+    promptInput.focus();
+  });
+
+  async function pollJob(jobId) {
+    while (true) {
+      const response = await fetch(
+        `${API_BASE}/api/v1/jobs/${encodeURIComponent(jobId)}`
+      );
+
+      const job = await readJson(response);
+      const status = job.status || "unknown";
+      const progress = Number(job.progress ?? 0);
+
+      progressBar.value = Math.max(0, Math.min(100, progress));
+      setStatus(`Music job: ${status} · ${progress}%`);
+
+      if (status === "succeeded") return job;
+
+      if (status === "failed") {
+        throw new Error(job.error?.message || job.error || "Music generation failed.");
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+  }
+
+  function addDownloadLink(container, url, label, filename) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.textContent = label;
+    link.download = filename;
+    link.target = "_blank";
+    link.rel = "noopener";
+    container.appendChild(link);
+  }
+
+  generateButton.addEventListener("click", async () => {
+    if (!selectedVideo) {
+      alert("Please upload a video first.");
+      return;
+    }
+
+    const prompt = promptInput.value.trim();
+    if (!prompt) {
+      alert("Please enter a music prompt.");
+      promptInput.focus();
+      return;
+    }
+
+    generateButton.disabled = true;
+    mergeButton.disabled = true;
+    musicDownloads.replaceChildren();
+    finalDownloads.replaceChildren();
+    finalPreview.classList.add("hidden");
+    musicResult.classList.add("hidden");
+    finalSection.classList.add("hidden");
+    progressBar.value = 0;
+
+    try {
+      setStatus("Submitting music-generation job...");
+
+      const payload = {
+        prompt,
+        duration_s: Number(durationInput.value),
+        output: {
+          sample_rate: 48000,
+          target_lufs: -16,
+          formats: ["wav", "mp3"]
+        }
+      };
+
+      const response = await fetch(`${API_BASE}/api/v1/music/jobs`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID()
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const created = await readJson(response);
+      currentJobId = created.job_id || created.id;
+
+      if (!currentJobId) {
+        throw new Error("The API response did not contain a job ID.");
+      }
+
+      currentJobResult = await pollJob(currentJobId);
+
+      const files = currentJobResult.result?.files || {};
+      const wavUrl = files["mix.wav"]?.url || files["mix.wav"];
+      const mp3Url = files["mix.mp3"]?.url || files["mix.mp3"];
+
+      if (!wavUrl && !mp3Url) {
+        throw new Error("The completed job did not return a mix.wav or mix.mp3 URL.");
+      }
+
+      audioPlayer.src = wavUrl
+        ? new URL(wavUrl, API_BASE).href
+        : new URL(mp3Url, API_BASE).href;
+
+      if (wavUrl) {
+        addDownloadLink(
+          musicDownloads,
+          new URL(wavUrl, API_BASE).href,
+          "Download WAV",
+          "mix.wav"
+        );
+      }
+
+      if (mp3Url) {
+        addDownloadLink(
+          musicDownloads,
+          new URL(mp3Url, API_BASE).href,
+          "Download MP3",
+          "mix.mp3"
+        );
+      }
+
+      musicResult.classList.remove("hidden");
+      finalSection.classList.remove("hidden");
+      setStatus("Music generated successfully. You can now create the final video.");
+      setMergeStatus("Ready to combine your video and generated music.");
+    } catch (error) {
+      setStatus(`Error: ${error.message}`);
+    } finally {
+      generateButton.disabled = false;
+      mergeButton.disabled = !currentJobId;
+    }
+  });
+
+  mergeButton.addEventListener("click", async () => {
+    if (!selectedVideo) {
+      alert("Please upload a video first.");
+      return;
+    }
+
+    if (!currentJobId) {
+      alert("Generate music before creating the final video.");
+      return;
+    }
+
+    mergeButton.disabled = true;
+    finalDownloads.replaceChildren();
+    finalPreview.classList.add("hidden");
+
+    try {
+      setMergeStatus("Uploading video and combining it with the music...");
+
+      const formData = new FormData();
+      formData.append("video", selectedVideo);
+
+      const response = await fetch(
+        `${API_BASE}/api/v1/jobs/${encodeURIComponent(currentJobId)}/final-video`,
+        {
+          method: "POST",
+          headers: {
+            "Idempotency-Key": crypto.randomUUID()
+          },
+          body: formData
+        }
+      );
+
+      const result = await readJson(response);
+      const finalUrl = new URL(result.preview_url || result.download_url, API_BASE).href;
+
+      finalPreview.src = finalUrl;
+      finalPreview.classList.remove("hidden");
+
+      addDownloadLink(
+        finalDownloads,
+        finalUrl,
+        "Download Final MP4",
+        "final_video.mp4"
+      );
+
+      setMergeStatus("Final video created successfully.");
+    } catch (error) {
+      setMergeStatus(`Error: ${error.message}`);
+    } finally {
+      mergeButton.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

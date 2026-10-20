@@ -1,0 +1,28 @@
+# Secrets and environment
+.env
+.env.*
+!.env.example
+
+# Python environments and cache
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# Large Stable Audio project and model files
+stable-audio-3/
+
+# Generated output and local storage
+storage/
+test_outputs/
+*.wav
+*.mp3
+
+# Backup files
+*_backup.*
+openapi_actual.json
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
