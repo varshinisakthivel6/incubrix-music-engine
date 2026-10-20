@@ -24,10 +24,9 @@
 
     h1 { margin-bottom: 8px; }
 
-    .subtitle {
-      color: #aab2c5;
-      margin-bottom: 24px;
-    }
+    .subtitle, .muted { color: #aab2c5; }
+
+    .subtitle { margin-bottom: 24px; }
 
     .card {
       background: #1a2030;
@@ -71,16 +70,12 @@
       cursor: not-allowed;
     }
 
-    .secondary {
-      background: #2a3449;
-    }
+    .secondary { background: #2a3449; }
 
     video, audio {
       width: 100%;
       margin-top: 14px;
     }
-
-    .muted { color: #aab2c5; }
 
     .status {
       padding: 12px;
@@ -126,8 +121,7 @@
     <h2>2. Describe your music</h2>
 
     <p class="muted">
-      Generate a starter prompt from the video's duration and metadata,
-      then edit it to describe the mood, instruments and style you want.
+      Create a starter prompt or enter your own music description.
     </p>
 
     <button id="suggestButton" class="secondary" type="button">
@@ -169,7 +163,7 @@
   <section id="finalSection" class="card hidden">
     <h2>3. Final video</h2>
     <p class="muted">
-      The generated music is combined with the uploaded video's visuals.
+      Combine your uploaded video with the generated music.
     </p>
 
     <button id="mergeButton" type="button">
@@ -186,7 +180,8 @@
 </div>
 
 <script>
-  const API_BASE = "http://127.0.0.1:8000";
+  // Public Render backend URL
+  const API_BASE = window.location.origin;
 
   const videoInput = document.getElementById("videoInput");
   const videoPreview = document.getElementById("videoPreview");
@@ -211,7 +206,6 @@
   let selectedVideo = null;
   let selectedVideoDuration = null;
   let currentJobId = null;
-  let currentJobResult = null;
 
   function setStatus(message) {
     statusText.textContent = message;
@@ -223,8 +217,10 @@
 
   function formatTime(seconds) {
     if (!Number.isFinite(seconds)) return "Unknown";
+
     const minutes = Math.floor(seconds / 60);
     const remaining = Math.floor(seconds % 60);
+
     return `${minutes}:${String(remaining).padStart(2, "0")}`;
   }
 
@@ -233,14 +229,33 @@
 
     if (!response.ok) {
       const detail = data.detail;
-      const message = typeof detail === "string"
-        ? detail
-        : detail?.message || data.message || `HTTP ${response.status}`;
+      const message =
+        typeof detail === "string"
+          ? detail
+          : detail?.message || data.message || `HTTP ${response.status}`;
 
       throw new Error(message);
     }
 
     return data;
+  }
+
+  function makeFileUrl(jobId, filename) {
+    return `${API_BASE}/api/v1/jobs/${
+      encodeURIComponent(jobId)
+    }/files/${encodeURIComponent(filename)}`;
+  }
+
+  function addDownloadLink(container, url, label, filename) {
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.textContent = label;
+    link.download = filename;
+    link.target = "_blank";
+    link.rel = "noopener";
+
+    container.appendChild(link);
   }
 
   videoInput.addEventListener("change", () => {
@@ -249,41 +264,43 @@
 
     videoPreview.classList.add("hidden");
     videoInfo.textContent = "No video selected.";
-    finalSection.classList.add("hidden");
+
+    if (videoPreview.src.startsWith("blob:")) {
+      URL.revokeObjectURL(videoPreview.src);
+    }
 
     if (!selectedVideo) return;
 
     const videoUrl = URL.createObjectURL(selectedVideo);
+
     videoPreview.src = videoUrl;
     videoPreview.classList.remove("hidden");
+
     videoInfo.textContent =
-      `${selectedVideo.name} · ${(selectedVideo.size / (1024 * 1024)).toFixed(1)} MB`;
+      `${selectedVideo.name} · ${
+        (selectedVideo.size / (1024 * 1024)).toFixed(1)
+      } MB`;
 
     videoPreview.onloadedmetadata = () => {
       selectedVideoDuration = videoPreview.duration;
+
       videoInfo.textContent =
-        `${selectedVideo.name} · ${formatTime(selectedVideoDuration)} · ` +
-        `${(selectedVideo.size / (1024 * 1024)).toFixed(1)} MB`;
+        `${selectedVideo.name} · ${formatTime(selectedVideoDuration)} · ${
+          (selectedVideo.size / (1024 * 1024)).toFixed(1)
+        } MB`;
     };
   });
 
   suggestButton.addEventListener("click", () => {
-    if (!selectedVideo) {
-      alert("Please select a video first.");
-      return;
-    }
-
     const durationText = Number.isFinite(selectedVideoDuration)
       ? `The video is approximately ${Math.round(selectedVideoDuration)} seconds long.`
-      : "Match the music length to the video.";
+      : "Create music suitable for a video.";
 
     promptInput.value =
-      `Create original instrumental background music for a video. ` +
-      `${durationText} ` +
-      `Mood: cinematic and engaging. ` +
-      `Use separate melody, bass, harmony and percussion parts. ` +
-      `No vocals, no lyrics, no recognizable copyrighted melodies. ` +
-      `Use a clean mix with a smooth ending.`;
+      `Create original instrumental background music. ${durationText} ` +
+      `Mood: cinematic, peaceful and engaging. ` +
+      `Use melody, bass, harmony and percussion. ` +
+      `No vocals or lyrics. Use a smooth ending.`;
 
     promptInput.focus();
   });
@@ -295,39 +312,31 @@
       );
 
       const job = await readJson(response);
-      const status = job.status || "unknown";
+      const status = String(job.status || "unknown").toLowerCase();
       const progress = Number(job.progress ?? 0);
 
       progressBar.value = Math.max(0, Math.min(100, progress));
       setStatus(`Music job: ${status} · ${progress}%`);
 
-      if (status === "succeeded") return job;
-
-      if (status === "failed") {
-        throw new Error(job.error?.message || job.error || "Music generation failed.");
+      if (["completed", "succeeded", "success"].includes(status)) {
+        return job;
       }
 
-      await new Promise(resolve => setTimeout(resolve, 1500));
-    }
-  }
+      if (status === "failed") {
+        throw new Error(
+          job.error?.message ||
+          job.error?.code ||
+          "Music generation failed."
+        );
+      }
 
-  function addDownloadLink(container, url, label, filename) {
-    const link = document.createElement("a");
-    link.href = url;
-    link.textContent = label;
-    link.download = filename;
-    link.target = "_blank";
-    link.rel = "noopener";
-    container.appendChild(link);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
   }
 
   generateButton.addEventListener("click", async () => {
-    if (!selectedVideo) {
-      alert("Please upload a video first.");
-      return;
-    }
-
     const prompt = promptInput.value.trim();
+
     if (!prompt) {
       alert("Please enter a music prompt.");
       promptInput.focus();
@@ -336,18 +345,21 @@
 
     generateButton.disabled = true;
     mergeButton.disabled = true;
+
+    currentJobId = null;
     musicDownloads.replaceChildren();
     finalDownloads.replaceChildren();
-    finalPreview.classList.add("hidden");
+
     musicResult.classList.add("hidden");
     finalSection.classList.add("hidden");
+    finalPreview.classList.add("hidden");
     progressBar.value = 0;
 
     try {
-      setStatus("Submitting music-generation job...");
+      setStatus("Connecting to IncuBrix backend...");
 
       const payload = {
-        prompt,
+        prompt: prompt,
         duration_s: Number(durationInput.value),
         output: {
           sample_rate: 48000,
@@ -359,8 +371,7 @@
       const response = await fetch(`${API_BASE}/api/v1/music/jobs`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID()
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(payload)
       });
@@ -372,47 +383,54 @@
         throw new Error("The API response did not contain a job ID.");
       }
 
-      currentJobResult = await pollJob(currentJobId);
+      setStatus("Music job submitted. Generating music...");
 
-      const files = currentJobResult.result?.files || {};
-      const wavUrl = files["mix.wav"]?.url || files["mix.wav"];
-      const mp3Url = files["mix.mp3"]?.url || files["mix.mp3"];
+      const completedJob = await pollJob(currentJobId);
 
-      if (!wavUrl && !mp3Url) {
-        throw new Error("The completed job did not return a mix.wav or mix.mp3 URL.");
-      }
+      // The backend provides a dedicated file-download endpoint.
+      const wavUrl = makeFileUrl(currentJobId, "mix.wav");
+      const mp3Url = makeFileUrl(currentJobId, "mix.mp3");
 
-      audioPlayer.src = wavUrl
-        ? new URL(wavUrl, API_BASE).href
-        : new URL(mp3Url, API_BASE).href;
+      // Try WAV first; if unavailable, the MP3 link is still provided.
+      audioPlayer.src = wavUrl;
+      audioPlayer.onerror = () => {
+        audioPlayer.onerror = null;
+        audioPlayer.src = mp3Url;
+      };
 
-      if (wavUrl) {
-        addDownloadLink(
-          musicDownloads,
-          new URL(wavUrl, API_BASE).href,
-          "Download WAV",
-          "mix.wav"
-        );
-      }
+      addDownloadLink(
+        musicDownloads,
+        wavUrl,
+        "Download WAV",
+        "mix.wav"
+      );
 
-      if (mp3Url) {
-        addDownloadLink(
-          musicDownloads,
-          new URL(mp3Url, API_BASE).href,
-          "Download MP3",
-          "mix.mp3"
-        );
-      }
+      addDownloadLink(
+        musicDownloads,
+        mp3Url,
+        "Download MP3",
+        "mix.mp3"
+      );
 
       musicResult.classList.remove("hidden");
       finalSection.classList.remove("hidden");
-      setStatus("Music generated successfully. You can now create the final video.");
-      setMergeStatus("Ready to combine your video and generated music.");
+
+      setStatus(
+        `Music job ${currentJobId} completed. Try playing the audio below.`
+      );
+
+      setMergeStatus(
+        "Music generated. You can now try creating the final video."
+      );
+
+      mergeButton.disabled = false;
+
     } catch (error) {
       setStatus(`Error: ${error.message}`);
+      console.error("Music generation error:", error);
+
     } finally {
       generateButton.disabled = false;
-      mergeButton.disabled = !currentJobId;
     }
   });
 
@@ -432,7 +450,7 @@
     finalPreview.classList.add("hidden");
 
     try {
-      setMergeStatus("Uploading video and combining it with the music...");
+      setMergeStatus("Sending video to the backend...");
 
       const formData = new FormData();
       formData.append("video", selectedVideo);
@@ -441,15 +459,20 @@
         `${API_BASE}/api/v1/jobs/${encodeURIComponent(currentJobId)}/final-video`,
         {
           method: "POST",
-          headers: {
-            "Idempotency-Key": crypto.randomUUID()
-          },
           body: formData
         }
       );
 
       const result = await readJson(response);
-      const finalUrl = new URL(result.preview_url || result.download_url, API_BASE).href;
+      const returnedUrl = result.preview_url || result.download_url;
+
+      if (!returnedUrl) {
+        throw new Error(
+          "The API did not return a final-video URL. Check the endpoint response schema."
+        );
+      }
+
+      const finalUrl = new URL(returnedUrl, API_BASE).href;
 
       finalPreview.src = finalUrl;
       finalPreview.classList.remove("hidden");
@@ -457,13 +480,16 @@
       addDownloadLink(
         finalDownloads,
         finalUrl,
-        "Download Final MP4",
+        "Download Final Video",
         "final_video.mp4"
       );
 
-      setMergeStatus("Final video created successfully.");
+      setMergeStatus("Final-video request completed.");
+
     } catch (error) {
       setMergeStatus(`Error: ${error.message}`);
+      console.error("Final video error:", error);
+
     } finally {
       mergeButton.disabled = false;
     }

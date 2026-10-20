@@ -12,6 +12,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY Frontend ./Frontend
 COPY scripts ./scripts
 
 ENV STORAGE_DIR=/app/storage

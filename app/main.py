@@ -15,6 +15,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.schemas import MusicJobRequest
 from app.services.job_service import JOBS, create_job, run_job
@@ -27,7 +28,7 @@ app = FastAPI(
     title="IncuBrix AI Background Music Engine",
     version="1.0.0",
 )
-
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "Frontend"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Local development only
@@ -57,6 +58,11 @@ def find_ffmpeg() -> str:
         )
 
     return executable
+
+
+@app.get("/")
+def serve_frontend():
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
 @app.get("/health")
