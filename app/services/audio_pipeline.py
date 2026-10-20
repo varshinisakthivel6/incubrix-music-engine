@@ -3,25 +3,23 @@ from pathlib import Path
 import json
 import subprocess
 import tempfile
+import shutil
 
 import numpy as np
 import soundfile as sf
 
 
-FFMPEG_EXE = Path(
-    r"C:\Users\shiva\AppData\Local\Microsoft\WinGet\Packages"
-    r"\Gyan.FFmpeg.Shared_Microsoft.Winget.Source_8wekyb3d8bbwe"
-    r"\ffmpeg-9.0.2-full_build-shared\bin\ffmpeg.exe"
-)
-
-
 def get_ffmpeg_exe():
-    """Return the verified FFmpeg executable path."""
-    if not FFMPEG_EXE.is_file():
-        raise FileNotFoundError(
-            f"FFmpeg executable not found: {FFMPEG_EXE}"
-        )
-    return str(FFMPEG_EXE)
+    """Find FFmpeg on Windows or Linux."""
+    ffmpeg = shutil.which("ffmpeg")
+
+    if ffmpeg:
+        return ffmpeg
+
+    raise FileNotFoundError(
+        "FFmpeg executable not found. "
+        "Please install FFmpeg and add it to PATH."
+    )
 
 
 def read_mono(path: Path):
@@ -140,10 +138,8 @@ def normalize_audio(
     target_lufs: float,
 ):
     """
-    Apply one common gain while respecting a -1 dBFS sample-peak ceiling.
-
-    This is linear gain control, not a limiter. If the peak ceiling
-    prevents reaching target_lufs, the final LUFS may remain below target.
+    Apply common gain while respecting a -1 dBFS sample-peak ceiling.
+    This is linear gain control, not a limiter.
     """
     audio = audio.astype(np.float32, copy=False)
 
@@ -195,7 +191,7 @@ def export_mix(
     target_lufs: float,
     formats: list[str],
 ):
-    """Export a single mix. Does not claim to create instrument stems."""
+    """Export a single mix."""
     out_dir.mkdir(parents=True, exist_ok=True)
 
     audio = apply_fades(audio, sample_rate)
@@ -265,13 +261,7 @@ def process_stems(
     target_lufs: float,
     formats: list[str],
 ):
-    """
-    Align stems and apply a common gain.
-
-    The mix is reconstructed from the processed stems. This preserves
-    their additive relationship, but cannot guarantee the loudness
-    target when the peak ceiling limits the available gain.
-    """
+    """Align stems and apply a common gain."""
     if not stem_paths:
         raise ValueError("No audio stems were provided.")
 
@@ -299,7 +289,6 @@ def process_stems(
             work_dir,
         )
 
-        # Keep this pipeline's stem output mono for predictable summing.
         if audio.shape[1] > 1:
             audio = audio.mean(axis=1, keepdims=True)
 
@@ -329,7 +318,6 @@ def process_stems(
             sample_rate,
         )
 
-    # Rebuild the mix from the exported stem arrays.
     mix = np.sum(
         np.stack(list(processed_stems.values()), axis=0),
         axis=0,
